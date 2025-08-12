@@ -1,0 +1,58 @@
+import json
+import boto3
+import os
+from datetime import datetime
+
+s3 = boto3.client(anviron['BUCKET_NAME']
+
+def lambda_handler(event, context):
+    try:
+        # Parse incoming JSON body
+        body = json.loads(event['body'])
+
+        # Required fields
+        required_fields = ['device_id', 'timestamp']
+        missing_fields = [field for field in required_fields if field not in body]
+
+        if missing_fields:
+            return {
+                'statusCode': 400,
+                'body': json.dumps({
+                    'error': f'Missing required fields: {', '.join(missing_fields)}'
+                })
+            }
+
+        # Extract required fields
+        device_id = body['device_id']
+        timestamp = body['timestamp']
+
+        # Validate timestamp format
+        try:
+            dt = datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            return {
+                'statusCode': 400,
+                'body': json.dumps({'error': 'Invalid timestamp format. Use ISO 8601 (e.g., 2025-07-20T08:45:00Z)'})
+            }
+
+        # Generate S3 object key using timestamp
+        s3_key = f"raw/year={dt.year}/month={dt.month:02d}/day={dt.day:02d}/data_{timestamp}.json"
+
+        # Upload the full body as-is (even if it has extra or missing optional fields)
+        s3.put_object(
+            Bucket=BUCKET_NAME,
+            Key=s3_key,
+            Body=json.dumps(body),
+            ContentType='application/json'
+        )
+
+        return {
+            'statusCode': 200,
+            'body': json.dumps({'message': 'Data successfully uploaded to S3'})
+                    }
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': str(e)})
+        }
