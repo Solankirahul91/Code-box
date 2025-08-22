@@ -1,0 +1,93 @@
+import json
+import boto3
+import os
+from datetime import datetime
+from boto3.dynamodb.conditions import Key, Attr
+import decimal
+
+# DynamoDB Table
+dynamodb = boto3.resource('dynamodb')
+TABLE_NAME = os.environ['PROCESSED_TABLE_NAME']
+table = dynamodb.Table(TABLE_NAME)
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, decimal.Decimal):
+            return float(o)
+        return super(DecimalEncoder, self).default(o)
+
+def lambda_handler(event, context):
+    try:
+        print("Received event:", json.dumps(event))
+        path = event.get("resource") or event.get("rawPath") or ""
+        params = event.get('queryStringParameters') or {}
+
+        # /search-all with server-side pagination
+        if "/search-all" in path:
+            page_size = int(params.get("limit", 50))
+            last_key = params.get("last_key")
+
+            scan_kwargs = {
+                "Limit": page_size
+            }
+
+            if last_key:
+                scan_kwargs["ExclusiveStartKey"] = json.loads(last_key)
+
+            response = table.scan(**scan_kwargs)
+
+            return respond(200, {
+                "items": response.get("Items", []),
+                "last_key": json.dumps(response.get("LastEvaluatedKey")) if "LastEvaluatedKey" in response else None
+            })
+
+        # /search by device_id (fast query)
+        device_id = params.get('device_id')
+        if not device_id:
+            return respond(400, "Missing required parameter: device_id")
+
+        from_timestamp = params.get('from')
+        to_timestamp = params.get('to')
+        sensor_type = params.get('sensor_type')
+
+        key_condition = Key('device_id').eq(device_id)
+
+        if from_timestamp and to_timestamp:
+            key_condition &= Key('timestamp').between(from_timestamp, to_timestamp)
+        elif from_timestamp:
+            key_condition &= Key('timestamp').gte(from_timestamp)
+        elif to_timestamp:
+            key_condition &= Key('timestamp').lte(to_timestamp)
+
+        query_kwargs = {
+            'KeyConditionExpression': key_condition,
+            'ScanIndexForward': False,
+            'Limit': int(params.get("limit", 50))
+        }
+
+        if sensor_type:
+            query_kwargs['FilterExpression'] = Attr("sensor_type").eq(sensor_type)
+
+        if params.get("last_key"):
+            query_kwargs["ExclusiveStartKey"] = json.loads(params["last_key"])
+
+        response = table.query(**query_kwargs)
+
+        return respond(200, {
+            "items": response.get("Items", []),
+            "last_key": json.dumps(response.get("LastEvaluatedKey")) if "LastEvaluatedKey" in response else None
+        })
+
+    except Exception as e:
+        print("Error:", str(e))
+        return respond(500, f"Internal server error: {str(e)}")
+
+def respond(status_code, body):
+    return {
+        'statusCode': status_code,
+        'body': json.dumps(body, cls=DecimalEncoder),
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+        }
+    }
