@@ -40,7 +40,7 @@
 
       <label class="block">
         <span class="text-sm font-semibold">Humidity (%):</span>
-        <input id="humidity" type="number" class="w-full p-2 rounded bg-white text-black" />
+        <input id="humidity" type="number" class="w-full p-2 rounded bg-white text-black" min="0" max="100"/>
         <label class="checkbox-label mt-1">
           <input type="checkbox" id="autoHumidity" checked /> Auto-generate
         </label>
@@ -56,7 +56,7 @@
 
       <label class="block">
         <span class="text-sm font-semibold">Pressure (hPa):</span>
-        <input id="pressure" type="number" class="w-full p-2 rounded bg-white text-black" />
+        <input id="pressure" type="number" class="w-full p-2 rounded bg-white text-black" min="800" max="1200"/>
         <label class="checkbox-label mt-1">
           <input type="checkbox" id="autoPressure" checked /> Auto-generate
         </label>
@@ -64,7 +64,7 @@
 
       <label class="block">
         <span class="text-sm font-semibold">Temperature (°C):</span>
-        <input id="temperature" type="number" class="w-full p-2 rounded bg-white text-black" />
+        <input id="temperature" type="number" class="w-full p-2 rounded bg-white text-black" min="-50" max="100"/>
         <label class="checkbox-label mt-1">
           <input type="checkbox" id="autoTemperature" checked /> Auto-generate
         </label>
@@ -77,30 +77,29 @@
         </label>
       </div>
 
-      <button id="generateBtn" class="w-full p-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded">
+      <button onclick="generateJSON()" class="w-full p-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded">
         Generate JSON File
       </button>
 
-      <button id="downloadBtn" disabled class="w-full p-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded">
-     ⬇️ Download JSON
+      <button id="downloadBtn" onclick="downloadJSON()" disabled class="w-full p-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded disabled:opacity-50">
+        ⬇️ Download JSON
       </button>
 
-      <button id="uploadBtn" disabled class="w-full p-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded">
+      <button id="uploadBtn" onclick="uploadToAPI()" disabled class="w-full p-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded disabled:opacity-50">
         ⬆️ Upload to API
       </button>
 
+      <!-- ✅ Auto-upload controls -->
       <div class="space-y-2 mt-4">
         <label class="block">
           <span class="text-sm font-semibold">Upload Frequency:</span>
           <select id="uploadFrequency" class="w-full p-2 rounded bg-white text-black">
             <option value="1000">1 per second</option>
-            <option value="300">3 per second</option>
             <option value="200">5 per second</option>
             <option value="100">10 per second</option>
             <option value="20">50 per second</option>
             <option value="60000">1 per minute</option>
             <option value="6000">10 per minute</option>
-            <option value="2000">30 per minute</option>
             <option value="600">100 per minute</option>
             <option value="300">200 per minute</option>
           </select>
@@ -110,16 +109,11 @@
           <span class="text-sm font-semibold">Auto-stop after:</span>
           <select id="duration" class="w-full p-2 rounded bg-white text-black">
             <option value="0">No limit</option>
-            <option value="5">5 minutes</option>
-            <option value="15">15 minutes</option>
             <option value="30">30 minutes</option>
             <option value="60">1 hour</option>
             <option value="180">3 hours</option>
-            <option value="300">5 hours</option>
           </select>
         </label>
-
-        <div id="remainingTimeDisplay" class="text-sm font-semibold text-gray-700 dark:text-gray-300"></div>
 
         <div class="flex gap-2">
           <button id="startAutoUploadBtn" class="flex-1 p-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
@@ -129,222 +123,212 @@
             ⏹️ Stop
           </button>
         </div>
+        <p id="countdown" class="text-xs mt-2 text-gray-600 dark:text-gray-300"></p>
       </div>
     </div>
 
     <div class="bg-gray-200 dark:bg-gray-800 p-4 rounded-xl shadow">
       <h2 class="font-semibold mb-2">Generated JSON Preview:</h2>
       <pre id="jsonPreview" class="code-box text-sm overflow-x-auto text-green-400"></pre>
+
+      <!-- ✅ Logs Panel -->
+      <h2 class="font-semibold mt-4 mb-2">📜 Logs</h2>
+      <div id="logs" class="bg-gray-100 dark:bg-gray-700 p-2 rounded h-40 overflow-y-auto text-xs"></div>
     </div>
   </div>
 
-<script>
-const locations = ["Ajmer","Alwar","Banswara","Barmer","Bharatpur","Bhilwara","Bikaner","Bundi","Chittorgarh","Churu","Dausa","Dholpur","Dungarpur","Hanumangarh","Jaipur","Jaisalmer","Jalore","Jhalawar","Jhunjhunu","Jodhpur","Karauli","Kota","Nagaur","Pali","Pratapgarh","Rajsamand","Sawai Madhopur","Sikar","Sirohi","Sri Ganganagar","Tonk","Udaipur"];
-let lastGeneratedData = [];
-let autoUploadInterval = null;
-let autoStopTimeout = null;
-let countdownInterval = null;
-let successfulUploads = 0;
+  <script>
+    const locations = ["Ajmer", "Alwar", "Banswara", "Barmer", "Bharatpur", "Bhilwara", "Bikaner", "Bundi", "Chittorgarh", "Churu", "Dausa", "Dholpur", "Dungarpur", "Hanumangarh", "Jaipur", "Jaisalmer", "Jalore", "Jhalawar", "Jhunjhunu", "Jodhpur", "Karauli", "Kota", "Nagaur", "Pali", "Pratapgarh", "Rajsamand", "Sawai Madhopur", "Sikar", "Sirohi", "Sri Ganganagar", "Tonk", "Udaipur"];
+    let lastGeneratedData = [];
 
-// Pad numbers to 3 digits
-function pad(num) {
-  return String(num).padStart(3, '0');
-}
-
-// Generate a single IoT entry
-function generateEntry() {
-  const autoDeviceId = document.getElementById("autoDeviceId").checked;
-  const autoHumidity = document.getElementById("autoHumidity").checked;
-  const autoPressure = document.getElementById("autoPressure").checked;
-  const autoTemperature = document.getElementById("autoTemperature").checked;
-  const autoLocation = document.getElementById("autoLocation").checked;
-
-  const deviceIdInput = document.getElementById("deviceId");
-  const humidityInput = document.getElementById("humidity");
-  const pressureInput = document.getElementById("pressure");
-  const temperatureInput = document.getElementById("temperature");
-  const locationSelect = document.getElementById("location");
-
-  const deviceId = autoDeviceId ? `sensor-${pad(Math.floor(Math.random() * 100 + 1))}` : deviceIdInput.value;
-  if (autoDeviceId) deviceIdInput.value = deviceId;
-
-  const humidity = autoHumidity ? Math.floor(Math.random() * 91) + 10 : (Number(humidityInput.value) || 0);
-  if (autoHumidity) humidityInput.value = humidity;
-
-  const pressure = autoPressure ? Math.floor(Math.random() * 201) + 900 : (Number(pressureInput.value) || 0);
-  if (autoPressure) pressureInput.value = pressure;
-
-  const temperature = autoTemperature ? Math.floor(Math.random() * 45) + 11 : (Number(temperatureInput.value) || 0);
-  if (autoTemperature) temperatureInput.value = temperature;
-
-  const location = autoLocation ? locations[Math.floor(Math.random() * locations.length)] : locationSelect.value;
-  if (autoLocation) locationSelect.value = location;
-
-  return {
-    device_id: deviceId,
-    humidity,
-    pressure,
-    temperature,
-    location,
-    timestamp: new Date().toISOString().split(".")[0] + 'Z',
-  };
-}
-
-// Generate JSON entries
-function generateJSON() {
-  const num = document.getElementById("autoMultiple").checked ? parseInt(document.getElementById("numEntries").value) : 1;
-  lastGeneratedData = Array.from({ length: num }, generateEntry);
-  document.getElementById("jsonPreview").textContent = JSON.stringify(lastGeneratedData, null, 2);
-
-  // Enable buttons
-  document.getElementById("downloadBtn").disabled = false;
-  document.getElementById("uploadBtn").disabled = false;
-}
-
-// Download JSON file
-function downloadJSON() {
-  if (!lastGeneratedData.length) return;
-  const dataStr = JSON.stringify(lastGeneratedData, null, 2);
-  const blob = new Blob([dataStr], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const deviceId = lastGeneratedData[0].device_id || "device";
-  const safeTimestamp = lastGeneratedData[0].timestamp
-    .replace(/[:.]/g, "-")
-    .replace("T", "_")
-    .replace("Z", "");
-  const filename = `${deviceId}_${safeTimestamp}.json`;
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-const apiEndpoint = "https://1didwbq7ui.execute-api.us-east-1.amazonaws.com/prod/Iot-data_producer";
-
-// Upload to API
-async function uploadToAPI() {
-  if (!lastGeneratedData.length) {
-    alert("⚠️ Please generate JSON first.");
-    return;
-  }
-  try {
-    const response = await fetch(apiEndpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(lastGeneratedData.length === 1 ? lastGeneratedData[0] : lastGeneratedData)
-    });
-    const result = await response.json();
-    if (response.ok) {
-      console.log("✅ Upload success:", result);
-      successfulUploads++; 
-      updateRemainingTimeDisplay();
-    } else {
-      alert("❌ Upload failed!");
-      console.error(result);
+    function logMessage(msg, type="info") {
+      const logs = document.getElementById("logs");
+      const entry = document.createElement("div");
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      entry.className = type === "error" ? "text-red-500" : "text-green-500";
+      logs.appendChild(entry);
+      logs.scrollTop = logs.scrollHeight;
     }
-  } catch (err) {
-    alert("❌ Network error!");
-    console.error(err);
-  }
-}
 
-// Auto upload loop
-async function autoUploadLoop() {
-  generateJSON();
-  await uploadToAPI();
-}
+    function pad(num) {
+      return String(num).padStart(3, '0');
+    }
 
-// Update display helper
-function updateRemainingTimeDisplay(remainingSeconds = null) {
-  const remainingTimeDisplay = document.getElementById("remainingTimeDisplay");
-  let timePart = remainingSeconds !== null
-    ? `⏳ Time left: ${Math.floor(remainingSeconds / 60)}m ${remainingSeconds % 60}s`
-    : '';
-  remainingTimeDisplay.textContent = `${timePart} | 📦 Successful uploads: ${successfulUploads}`;
-}
+    function generateEntry() {
+      const autoDeviceId = document.getElementById("autoDeviceId").checked;
+      const autoHumidity = document.getElementById("autoHumidity").checked;
+      const autoPressure = document.getElementById("autoPressure").checked;
+      const autoTemperature = document.getElementById("autoTemperature").checked;
+      const autoLocation = document.getElementById("autoLocation").checked;
 
-// DOM ready
-document.addEventListener("DOMContentLoaded", () => {
-  // Populate location select
-  const locationSelect = document.getElementById("location");
-  locations.forEach(loc => {
-    const option = document.createElement("option");
-    option.value = loc;
-    option.text = loc;
-    locationSelect.appendChild(option);
-  });
-  generateEntry();
+      const deviceIdInput = document.getElementById("deviceId");
+      const humidityInput = document.getElementById("humidity");
+      const pressureInput = document.getElementById("pressure");
+      const temperatureInput = document.getElementById("temperature");
+      const locationSelect = document.getElementById("location");
 
-  // Dark mode persistence
-  const darkToggle = document.getElementById("darkModeToggle");
-  if (localStorage.getItem("darkMode") === "true") {
-    document.body.classList.add("dark");
-    darkToggle.checked = true;
-  }
-  darkToggle.addEventListener("change", (e) => {
-    document.body.classList.toggle("dark", e.target.checked);
-    localStorage.setItem("darkMode", e.target.checked);
-  });
+      const deviceId = autoDeviceId ? `sensor-${pad(Math.floor(Math.random() * 100 + 1))}` : deviceIdInput.value;
+      if (autoDeviceId) deviceIdInput.value = deviceId;
 
-  // Button events
-  document.getElementById("generateBtn").addEventListener("click", generateJSON);
-  document.getElementById("downloadBtn").addEventListener("click", downloadJSON);
-  document.getElementById("uploadBtn").addEventListener("click", uploadToAPI);
+      const humidity = autoHumidity ? Math.floor(Math.random() * 91) + 10 : parseInt(humidityInput.value);
+      if (autoHumidity) humidityInput.value = humidity;
 
-  const startBtn = document.getElementById("startAutoUploadBtn");
-  const stopBtn = document.getElementById("stopAutoUploadBtn");
+      const pressure = autoPressure ? Math.floor(Math.random() * 201) + 900 : parseInt(pressureInput.value);
+      if (autoPressure) pressureInput.value = pressure;
 
-  startBtn.addEventListener("click", () => {
-    const freq = parseInt(document.getElementById("uploadFrequency").value);
-    const durationMinutes = parseInt(document.getElementById("duration").value);
+      const temperature = autoTemperature ? Math.floor(Math.random() * 45) + 11 : parseInt(temperatureInput.value);
+      if (autoTemperature) temperatureInput.value = temperature;
 
-    clearInterval(autoUploadInterval);
-    clearTimeout(autoStopTimeout);
-    clearInterval(countdownInterval);
+      const location = autoLocation ? locations[Math.floor(Math.random() * locations.length)] : locationSelect.value;
+      if (autoLocation) locationSelect.value = location;
 
-    successfulUploads = 0; // reset count
-    autoUploadLoop();
-    autoUploadInterval = setInterval(autoUploadLoop, freq);
-
-    if (durationMinutes > 0) {
-      let remainingSeconds = durationMinutes * 60;
-      const updateRemainingTime = () => {
-        updateRemainingTimeDisplay(remainingSeconds);
-        remainingSeconds--;
+      return {
+        device_id: deviceId,
+        humidity: humidity,
+        pressure: pressure,
+        temperature: temperature,
+        location: location,
+        timestamp: new Date().toISOString().split(".")[0] + 'Z',
       };
-      updateRemainingTime();
-      countdownInterval = setInterval(updateRemainingTime, 1000);
-
-      autoStopTimeout = setTimeout(() => {
-  	clearInterval(autoUploadInterval);
-	  clearInterval(countdownInterval);
-	  autoUploadInterval = null;
-	  startBtn.disabled = false;
-	  stopBtn.disabled = true;
-	  document.getElementById("remainingTimeDisplay").textContent =
-	    `✅ Auto-upload stopped. Total successful uploads: ${successfulUploads}`;
-	}, durationMinutes * 60 * 1000);
-    } else {
-      updateRemainingTimeDisplay();
     }
 
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
-  });
+    function generateJSON() {
+      const num = document.getElementById("autoMultiple").checked ? parseInt(document.getElementById("numEntries").value) : 1;
+      lastGeneratedData = Array.from({ length: num }, generateEntry);
+      const jsonPreview = JSON.stringify(num === 1 ? lastGeneratedData[0] : lastGeneratedData, null, 2);
+      document.getElementById("jsonPreview").textContent = jsonPreview;
+      document.getElementById("downloadBtn").disabled = false;
+      document.getElementById("uploadBtn").disabled = false;
+      logMessage(`Generated ${num} JSON entr${num > 1 ? "ies" : "y"}.`);
+    }
 
-  stopBtn.addEventListener("click", () => {
-  clearInterval(autoUploadInterval);
-  clearTimeout(autoStopTimeout);
-  clearInterval(countdownInterval);
-  autoUploadInterval = null;
-  autoStopTimeout = null;
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
-  document.getElementById("remainingTimeDisplay").textContent =
-    ⏹️ Stopped manually. Total successful uploads: ${successfulUploads}`;
-});
-});
-</script>
+    function downloadJSON() {
+      if (lastGeneratedData.length === 0) return;
+      const dataStr = JSON.stringify(lastGeneratedData.length === 1 ? lastGeneratedData[0] : lastGeneratedData, null, 2);
+      const blob = new Blob([dataStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const deviceId = lastGeneratedData[0].device_id || "device";
+      const timestamp = lastGeneratedData[0].timestamp.replace(/[:]/g, "-");
+      const filename = `${deviceId}_${timestamp}.json`;
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      logMessage("⬇️ JSON file downloaded.");
+    }
+
+    const apiEndpoint = "https://1didwbq7ui.execute-api.us-east-1.amazonaws.com/prod/IoT-data-ingest-to-s3";
+
+    async function uploadToAPI() {
+      if (lastGeneratedData.length === 0) {
+        alert("⚠️ Please generate JSON first.");
+        return;
+      }
+      try {
+        const response = await fetch(apiEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(lastGeneratedData.length === 1 ? lastGeneratedData[0] : lastGeneratedData)
+        });
+        const result = await response.json();
+        if (response.ok) {
+          logMessage("✅ Upload success.");
+        } else {
+          logMessage("❌ Upload failed.", "error");
+        }
+      } catch (err) {
+        logMessage("❌ Network error: " + err.message, "error");
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      const locationSelect = document.getElementById("location");
+      locations.forEach(loc => {
+        const option = document.createElement("option");
+        option.value = loc;
+        option.text = loc;
+        locationSelect.appendChild(option);
+      });
+      generateEntry();
+    });
+
+    document.getElementById("darkModeToggle").addEventListener("change", (e) => {
+      document.body.classList.toggle("dark", e.target.checked);
+    });
+
+    let autoUploadInterval = null;
+    let autoStopTimeout = null;
+    let countdownInterval = null;
+
+    async function autoUploadLoop() {
+      generateJSON();
+      await uploadToAPI();
+    }
+
+    const startBtn = document.getElementById("startAutoUploadBtn");
+    const stopBtn = document.getElementById("stopAutoUploadBtn");
+    const countdownEl = document.getElementById("countdown");
+
+    startBtn.addEventListener("click", () => {
+      const freq = parseInt(document.getElementById("uploadFrequency").value);
+      const durationMinutes = parseInt(document.getElementById("duration").value);
+
+      clearInterval(autoUploadInterval);
+      clearTimeout(autoStopTimeout);
+      clearInterval(countdownInterval);
+
+      autoUploadLoop();
+      autoUploadInterval = setInterval(autoUploadLoop, freq);
+
+      if (durationMinutes > 0) {
+        const endTime = Date.now() + durationMinutes * 60 * 1000;
+        countdownInterval = setInterval(() => {
+          const remaining = endTime - Date.now();
+          if (remaining <= 0) {
+            clearInterval(countdownInterval);
+            countdownEl.textContent = "✅ Auto-upload finished.";
+          } else {
+            const m = String(Math.floor(remaining / 60000)).padStart(2, "0");
+            const s = String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0");
+            countdownEl.textContent = `⏳ Time left: ${m}:${s}`;
+          }
+        }, 1000);
+
+        autoStopTimeout = setTimeout(() => {
+          clearInterval(autoUploadInterval);
+          clearInterval(countdownInterval);
+          autoUploadInterval = null;
+          startBtn.disabled = false;
+          stopBtn.disabled = true;
+          logMessage(`⏹️ Auto-upload stopped after ${durationMinutes} minutes`);
+        }, durationMinutes * 60 * 1000);
+      }
+
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      logMessage("▶️ Auto-upload started.");
+    });
+
+    stopBtn.addEventListener("click", () => {
+      clearInterval(autoUploadInterval);
+      clearTimeout(autoStopTimeout);
+      clearInterval(countdownInterval);
+      autoUploadInterval = null;
+      autoStopTimeout = null;
+      countdownEl.textContent = "⏹️ Auto-upload manually stopped.";
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      logMessage("⏹️ Auto-upload manually stopped.", "error");
+    });
+
+    document.getElementById("uploadFrequency").addEventListener("change", function () {
+      if (autoUploadInterval !== null) {
+        clearInterval(autoUploadInterval);
+        autoUploadInterval = setInterval(autoUploadLoop, parseInt(this.value));
+        logMessage(`⚡ Upload frequency updated to ${this.options[this.selectedIndex].text}`);
+      }
+    });
+  </script>
 </body>
 </html>
