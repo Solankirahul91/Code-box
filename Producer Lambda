@@ -1,0 +1,89 @@
+import boto3
+import json
+import os
+from datetime import datetime
+
+kinesis = boto3.client('kinesis')
+KINESIS_STREAM_NAME = os.environ.get("KINESIS_STREAM_NAME")
+
+REQUIRED_FIELDS = ["device_id", "timestamp", "temperature"]
+
+def lambda_handler(event, context):
+    try:
+        if event.get("httpMethod", "").upper() == "OPTIONS":
+            return {
+                "statusCode": 200,
+                "headers": cors_headers(),
+                "body": json.dumps({"message": "CORS preflight OK"})
+            }
+
+        body_str = event.get("body", "").strip()
+        if not body_str:
+            return error_response("Empty request body")
+
+        try:
+            body = json.loads(body_str)
+        except json.JSONDecodeError:
+            return error_response("Invalid JSON format")
+
+        if not isinstance(body, list):
+            body = [body]
+
+        records_batch = []
+        for idx, record in enumerate(body):
+            if not isinstance(record, dict):
+                return error_response(f"Record {idx} is not a JSON object")
+
+            missing = [f for f in REQUIRED_FIELDS if f not in record]
+            if missing:
+                return error_response(f"Record {idx} missing required fields: {', '.join(missing)}")
+
+            try:
+                datetime.strptime(record["timestamp"], "%Y-%m-%dT%H:%M:%SZ")
+            except ValueError:
+                return error_response(f"Record {idx} has invalid timestamp format")
+
+            records_batch.append({
+                'Data': json.dumps(record),
+                'PartitionKey': record.get("device_id", "default")
+            })
+
+        if records_batch:
+            # Send in bulk
+            response = kinesis.put_records(
+                StreamName=KINESIS_STREAM_NAME,
+                Records=records_batch
+            )
+
+            failed = response['FailedRecordCount']
+            return {
+                "statusCode": 200,
+                "headers": cors_headers(),
+                "body": json.dumps({
+                    "message": f"{len(records_batch) - failed} of {len(records_batch)} record(s) sent",
+                    "failed_count": failed
+                })
+            }
+
+        return error_response("No valid records to send")
+
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "headers": cors_headers(),
+            "body": json.dumps({"error": str(e)})
+        }
+
+def cors_headers():
+    return {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "OPTIONS,POST"
+    }
+
+def error_response(message):
+    return {
+        "statusCode": 400,
+        "headers": cors_headers(),
+        "body": json.dumps({"error": message})
+    }
