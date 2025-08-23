@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>IoT Data Search </title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+
+  <style>
+    body { background: #f5f7fa; padding: 2rem; }
+    .card { border-radius: 12px; }
+    th { background-color: #0d6efd; color: #fff; }
+    .form-control, .form-select, .btn { border-radius: 8px; }
+    table { table-layout: fixed; width: 100%; }
+    td, th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h3 class="mb-3"><i class="fas fa-search"></i> IoT Data Search</h3>
+
+    <div class="card p-3 mb-3 shadow-sm">
+      <div class="row g-2 align-items-end">
+        <div class="col-md-3">
+          <label class="form-label">Device ID</label>
+          <input id="device_id" class="form-control" placeholder="e.g. sensor-123" />
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label">From</label>
+          <input id="from" type="datetime-local" class="form-control" />
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label">To</label>
+          <input id="to" type="datetime-local" class="form-control" />
+        </div>
+
+        <div class="col-md-5 d-flex gap-2">
+          <button id="btnSearch" class="btn btn-primary w-100">
+            <i class="fas fa-search"></i> Search
+          </button>
+          <button id="btnRefresh" class="btn btn-secondary">
+            <i class="fas fa-sync-alt"></i> Refresh
+          </button>
+          <button id="btnShowAll" class="btn btn-success">
+            <i class="fas fa-database"></i> Show All
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls: rows-per-page + info -->
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="d-flex align-items-center gap-2">
+        <label class="mb-0">Rows per page:</label>
+        <select id="rowsPerPage" class="form-select d-inline-block w-auto">
+          <option value="5">5</option>
+          <option value="10">10</option>
+          <option value="25">25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+
+      <div id="pageInfo" class="text-muted">No data loaded</div>
+    </div>
+
+    <div class="table-responsive card p-3 shadow-sm">
+      <table class="table table-bordered mb-0" id="resultTable">
+        <thead>
+          <tr>
+            <th style="width:15%">Device ID</th>
+            <th style="width:12%">Humidity</th>
+            <th style="width:12%">Pressure</th>
+            <th style="width:12%">Temperature</th>
+            <th style="width:18%">Location</th>
+            <th style="width:31%">Timestamp</th>
+          </tr>
+        </thead>
+        <tbody id="resultBody">
+          <tr><td colspan="6" class="text-center text-muted">No results — perform a search or click Show All</td></tr>
+        </tbody>
+      </table>
+
+      <nav class="mt-3">
+        <ul class="pagination justify-content-start mb-0" id="pagination"></ul>
+      </nav>
+    </div>
+  </div>
+
+  <script>
+  // ================== Configuration ==================
+  const apiBaseUrl = "https://1didwbq7ui.execute-api.us-east-1.amazonaws.com/prod";
+  // ===================================================
+
+  // State
+  let currentEndpoint = null; // "search" or "search-all"
+  let rowsPerPage = parseInt(localStorage.getItem("rowsPerPage") || "10", 10);
+  let currentPage = 1;
+  // pagesCache: { "search": { "<querySignature>": { pages: {1: items, 2: items}, lastKeys: {1: null,2: "<LEK>"} } }, "search-all": { pages: {...}, ... } }
+  // To keep it simple, we store one active session per endpoint keyed by a signature (query params).
+  const sessions = {};
+  // activeSessionKey string identifies current session (endpoint + query params)
+  let activeSessionKey = null;
+
+  // DOM refs
+  const elRowsPerPage = document.getElementById("rowsPerPage");
+  const elResultBody = document.getElementById("resultBody");
+  const elPagination = document.getElementById("pagination");
+  const elPageInfo = document.getElementById("pageInfo");
+
+  // Initialize UI values
+  elRowsPerPage.value = String(rowsPerPage);
+
+  // Util: build a simple session key for current filters so search caching is per-filter
+  function buildSessionKey(endpoint, params = {}) {
+    // Only include relevant params for uniqueness
+    if (endpoint === "search") {
+      return `search|device=${params.device_id || ""}|from=${params.from || ""}|to=${params.to || ""}|limit=${rowsPerPage}`;
+    }
+    return `search-all|limit=${rowsPerPage}`;
+  }
+
+  // Helper: get or create session object
+  function getSession(key) {
+    if (!sessions[key]) {
+      sessions[key] = {
+        pages: {},      // pages[pageNumber] = array of items
+        lastKeys: {},   // lastKeys[pageNumber] = last_evaluated_key returned AFTER fetching that page (used to fetch next page)
+        fetchedPages: 0 // highest page fetched
+      };
+    }
+    return sessions[key];
+  }
+
+  // Build URL for server-side endpoints (adds limit and last_key when provided)
+  function buildUrlForPage(endpoint, params = {}, pageNumber = 1) {
+    let url;
+    if (endpoint === "search") {
+      url = new URL(`${apiBaseUrl}/search`);
+      if (params.device_id) url.searchParams.append("device_id", params.device_id);
+      if (params.from) url.searchParams.append("from", params.from);
+      if (params.to) url.searchParams.append("to", params.to);
+      url.searchParams.append("limit", rowsPerPage);
+    } else {
+      url = new URL(`${apiBaseUrl}/search-all`);
+      url.searchParams.append("limit", rowsPerPage);
+    }
+
+    // include last_key if we have an ExclusiveStartKey for this page (we send the key that leads into this page)
+    const sessionKey = buildSessionKey(endpoint, params);
+    const session = sessions[sessionKey];
+    if (session && pageNumber > 1) {
+      const startKey = session.lastKeys[pageNumber - 1] || null; // ExclusiveStartKey to request pageNumber
+      if (startKey) {
+        // last_key should be a JSON string (your lambda expects JSON string and does json.loads)
+        url.searchParams.append("last_key", startKey);
+      }
+    }
+    return url.toString();
+  }
+
+  // Render table rows from an items array
+  function renderTableItems(items) {
+    elResultBody.innerHTML = "";
+    if (!items || items.length === 0) {
+      elResultBody.innerHTML = "<tr><td colspan='6' class='text-center text-muted'>No results found.</td></tr>";
+      return;
+    }
+    const rowsHtml = items.map(item => {
+      return `<tr>
+        <td>${escapeHtml(item.device_id ?? "—")}</td>
+        <td>${escapeHtml(item.humidity ?? "—")}</td>
+        <td>${escapeHtml(item.pressure ?? "—")}</td>
+        <td>${escapeHtml(item.temperature ?? "—")}</td>
+        <td>${escapeHtml(item.location ?? "—")}</td>
+        <td>${escapeHtml(item.timestamp ?? "—")}</td>
+      </tr>`;
+    }).join("");
+    elResultBody.innerHTML = rowsHtml;
+  }
+
+  // Escaping helper (small)
+  function escapeHtml(s) {
+    if (s === null || s === undefined) return "";
+    return String(s)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
+  }
+
+  // Fetch a page (1-based). If it's already cached we use cache. Otherwise request backend with the appropriate last_key.
+  async function fetchPage(endpoint, params = {}, pageNumber = 1) {
+    activeSessionKey = buildSessionKey(endpoint, params);
+    const session = getSession(activeSessionKey);
+
+    // If we already have page in cache, render it
+    if (session.pages[pageNumber]) {
+      currentPage = pageNumber;
+      renderTableItems(session.pages[pageNumber]);
+      renderPaginationControls(endpoint, params);
+      return;
+    }
+
+    // Build URL — it may include last_key from session.lastKeys[pageNumber-1]
+    const url = buildUrlForPage(endpoint, params, pageNumber);
+
+    try {
+      showLoading();
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const payload = await res.json();
+
+      // payload expected shape: { items: [...], last_key: "<JSON string>" } per your lambda
+      const items = payload.items || [];
+      const lastKeyFromServer = payload.last_key || null; // string or null
+
+      // Cache results
+      session.pages[pageNumber] = items;
+      session.lastKeys[pageNumber] = lastKeyFromServer; // this key is used as ExclusiveStartKey for next page
+      session.fetchedPages = Math.max(session.fetchedPages, pageNumber);
+
+      // Update UI
+      currentPage = pageNumber;
+      renderTableItems(items);
+      renderPaginationControls(endpoint, params);
+
+    } catch (err) {
+      console.error("Error fetching page:", err);
+      elResultBody.innerHTML = `<tr><td colspan="6" class="text-danger">Error fetching data: ${escapeHtml(String(err))}</td></tr>`;
+      elPagination.innerHTML = "";
+      elPageInfo.textContent = "Error";
+    } finally {
+      hideLoading();
+    }
+  }
+
+  // Render pagination: Prev, page numbers for fetched pages, Next (enabled if lastKey for current page is non-null)
+  function renderPaginationControls(endpoint, params = {}) {
+    const sessionKey = buildSessionKey(endpoint, params);
+    const session = getSession(sessionKey);
+
+    const totalFetched = session.fetchedPages || 0;
+    const current = currentPage;
+    const hasPrev = current > 1;
+    const hasNext = !!session.lastKeys[current]; // if lastKeys[current] is non-null, there is a next page
+
+    // Build pagination UI
+    elPagination.innerHTML = "";
+
+    // Prev
+    const prevLi = document.createElement("li");
+    prevLi.className = `page-item ${hasPrev ? "" : "disabled"}`;
+    const prevA = document.createElement("a");
+    prevA.className = "page-link";
+    prevA.href = "#";
+    prevA.textContent = "« Prev";
+    prevA.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (hasPrev) fetchPage(endpoint, params, current - 1);
+    });
+    prevLi.appendChild(prevA);
+    elPagination.appendChild(prevLi);
+
+    // Page numbers for pages already fetched (1..totalFetched)
+    // Show a small window around current for clarity (we only show pages that are already fetched)
+    const windowSize = 3;
+    const start = Math.max(1, current - windowSize);
+    const end = Math.min(totalFetched, current + windowSize);
+    // If first fetched page > 1 (shouldn't happen) show first
+    for (let p = start; p <= end; p++) {
+      const li = document.createElement("li");
+      li.className = `page-item ${p === current ? "active" : ""}`;
+      const a = document.createElement("a");
+      a.className = "page-link";
+      a.href = "#";
+      a.textContent = p;
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        fetchPage(endpoint, params, p);
+      });
+      li.appendChild(a);
+      elPagination.appendChild(li);
+    }
+
+    // If there are more pages that haven't been fetched yet, show an ellipsis + next page number (current+1)
+    if (hasNext) {
+      const ell = document.createElement("li");
+      ell.className = "page-item disabled";
+      const span = document.createElement("span");
+      span.className = "page-link";
+      span.textContent = "…";
+      ell.appendChild(span);
+      elPagination.appendChild(ell);
+
+      const nextPageNumber = totalFetched + 1; // this is the next page we will fetch
+      const liNextPage = document.createElement("li");
+      liNextPage.className = `page-item ${nextPageNumber === current ? "active" : ""}`;
+      const aNextPage = document.createElement("a");
+      aNextPage.className = "page-link";
+      aNextPage.href = "#";
+      aNextPage.textContent = nextPageNumber;
+      aNextPage.addEventListener("click", (e) => {
+        e.preventDefault();
+        fetchPage(endpoint, params, nextPageNumber);
+      });
+      liNextPage.appendChild(aNextPage);
+      elPagination.appendChild(liNextPage);
+    }
+
+    // Next
+    const nextLi = document.createElement("li");
+    nextLi.className = `page-item ${hasNext ? "" : "disabled"}`;
+    const nextA = document.createElement("a");
+    nextA.className = "page-link";
+    nextA.href = "#";
+    nextA.textContent = "Next »";
+    nextA.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (hasNext) {
+        // Next page number is either current+1 or totalFetched+1; use current+1
+        fetchPage(endpoint, params, current + 1);
+      }
+    });
+    nextLi.appendChild(nextA);
+    elPagination.appendChild(nextLi);
+
+    // Page info text
+    const showingCount = (session.pages[current] || []).length;
+    const showingStart = ((current - 1) * rowsPerPage) + 1;
+    const showingEnd = showingStart + showingCount - 1;
+    const more = hasNext ? " (more available)" : "";
+    elPageInfo.textContent = `Page ${current} · Showing ${showingStart}-${showingEnd} of page (rows per page ${rowsPerPage})${more}`;
+  }
+
+  // UI helpers
+  function showLoading() {
+    // simple visual; you can replace with spinner
+    elPageInfo.textContent = "Loading…";
+  }
+  function hideLoading() {
+    // no-op; pageInfo updated by renderPaginationControls
+  }
+
+  // Handlers for Search and ShowAll
+  async function handleSearch(page = 1) {
+    const device_id = document.getElementById("device_id").value.trim();
+    const from = document.getElementById("from").value;
+    const to = document.getElementById("to").value;
+
+    if (!device_id) {
+      alert("Device ID is required for search.");
+      return;
+    }
+
+    // New search session -> reset session for this signature
+    const params = { device_id, from, to };
+    const sessionKey = buildSessionKey("search", params);
+    sessions[sessionKey] = { pages: {}, lastKeys: {}, fetchedPages: 0 };
+
+    currentEndpoint = "search";
+    await fetchPage("search", params, page);
+  }
+
+  async function handleShowAll(page = 1) {
+    const params = {};
+    const sessionKey = buildSessionKey("search-all", params);
+    sessions[sessionKey] = { pages: {}, lastKeys: {}, fetchedPages: 0 };
+
+    currentEndpoint = "search-all";
+    await fetchPage("search-all", params, page);
+  }
+
+  // Wire up buttons
+  document.getElementById("btnSearch").addEventListener("click", () => handleSearch(1));
+  document.getElementById("btnShowAll").addEventListener("click", () => handleShowAll(1));
+  document.getElementById("btnRefresh").addEventListener("click", () => {
+    if (!currentEndpoint) return location.reload();
+    // re-fetch current page fresh (clear session cache for this key)
+    const [ep, ...rest] = activeSessionKey.split("|");
+    if (currentEndpoint === "search") {
+      // reconstruct params from form and start fresh
+      handleSearch(currentPage);
+    } else {
+      handleShowAll(currentPage);
+    }
+  });
+
+  // rowsPerPage change
+  elRowsPerPage.addEventListener("change", () => {
+    const newVal = parseInt(elRowsPerPage.value, 10) || 10;
+    rowsPerPage = newVal;
+    localStorage.setItem("rowsPerPage", String(newVal));
+    // Reset sessions because limit changed -> different pagination keys
+    Object.keys(sessions).forEach(k => delete sessions[k]);
+    // Re-run current action (if any) from page 1
+    if (currentEndpoint === "search") handleSearch(1);
+    else if (currentEndpoint === "search-all") handleShowAll(1);
+    else {
+      // no current endpoint — clear table and pagination
+      elResultBody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">Rows per page set to ${rowsPerPage}. Run a search or Show All.</td></tr>`;
+      elPagination.innerHTML = "";
+      elPageInfo.textContent = "No data loaded";
+    }
+  });
+
+  // Keyboard: Enter on device id triggers search
+  document.getElementById("device_id").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleSearch(1);
+    }
+  });
+
+  // Initial UI
+  elPageInfo.textContent = `Rows per page: ${rowsPerPage}. No data loaded.`;
+
+  </script>
+</body>
+</html>
