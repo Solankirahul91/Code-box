@@ -1,425 +1,350 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>IoT Data Search </title>
-
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
-
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mock IoT Data Generator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    body { background: #f5f7fa; padding: 2rem; }
-    .card { border-radius: 12px; }
-    th { background-color: #0d6efd; color: #fff; }
-    .form-control, .form-select, .btn { border-radius: 8px; }
-    table { table-layout: fixed; width: 100%; }
-    td, th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .code-box {
+      font-family: 'Fira Code', monospace;
+      white-space: pre;
+    }
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
   </style>
 </head>
-<body>
-  <div class="container">
-    <h3 class="mb-3"><i class="fas fa-search"></i> IoT Data Search</h3>
 
-    <div class="card p-3 mb-3 shadow-sm">
-      <div class="row g-2 align-items-end">
-        <div class="col-md-3">
-          <label class="form-label">Device ID</label>
-          <input id="device_id" class="form-control" placeholder="e.g. sensor-123" />
-        </div>
+<body class="bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+  <div class="flex items-center justify-between p-4 border-b dark:border-gray-700">
+    <h1 class="text-xl font-bold">Mock IoT Data Generator</h1>
+    <label class="flex items-center gap-2">
+      <input type="checkbox" id="darkModeToggle" />
+      <span>🌙 Dark Mode</span>
+    </label>
+  </div>
 
-        <div class="col-md-2">
-          <label class="form-label">From</label>
-          <input id="from" type="datetime-local" class="form-control" />
-        </div>
+  <div class="p-2 grid grid-cols-1 lg:grid-cols-2 gap-3">
+    <div class="bg-gray-200 dark:bg-gray-800 p-4 rounded-xl shadow space-y-1">
 
-        <div class="col-md-2">
-          <label class="form-label">To</label>
-          <input id="to" type="datetime-local" class="form-control" />
-        </div>
+      <label class="block">
+        <span class="text-sm font-semibold">Device ID:</span>
+        <input id="deviceId" type="text" class="w-full p-2 rounded bg-white text-black" />
+        <label class="checkbox-label mt-1">
+          <input type="checkbox" id="autoDeviceId" checked /> Auto
+        </label>
+      </label>
 
-        <div class="col-md-5 d-flex gap-2">
-          <button id="btnSearch" class="btn btn-primary w-100">
-            <i class="fas fa-search"></i> Search
+      <label class="block">
+        <span class="text-sm font-semibold">Humidity (%):</span>
+        <input id="humidity" type="number" class="w-full p-2 rounded bg-white text-black" />
+        <label class="checkbox-label mt-1">
+          <input type="checkbox" id="autoHumidity" checked /> Auto-generate
+        </label>
+      </label>
+
+      <label class="block">
+        <span class="text-sm font-semibold">Location:</span>
+        <select id="location" class="w-full p-2 rounded bg-white text-black"></select>
+        <label class="checkbox-label mt-1">
+          <input type="checkbox" id="autoLocation" checked /> Randomize
+        </label>
+      </label>
+
+      <label class="block">
+        <span class="text-sm font-semibold">Pressure (hPa):</span>
+        <input id="pressure" type="number" class="w-full p-2 rounded bg-white text-black" />
+        <label class="checkbox-label mt-1">
+          <input type="checkbox" id="autoPressure" checked /> Auto-generate
+        </label>
+      </label>
+
+      <label class="block">
+        <span class="text-sm font-semibold">Temperature (°C):</span>
+        <input id="temperature" type="number" class="w-full p-2 rounded bg-white text-black" />
+        <label class="checkbox-label mt-1">
+          <input type="checkbox" id="autoTemperature" checked /> Auto-generate
+        </label>
+      </label>
+
+      <div class="flex items-center gap-2">
+        <input id="numEntries" type="number" min="1" max="100" value="1" class="w-20 p-2 rounded bg-white text-black" />
+        <label class="checkbox-label">
+          <input type="checkbox" id="autoMultiple" /> Auto-generate multiple entries
+        </label>
+      </div>
+
+      <button id="generateBtn" class="w-full p-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded">
+        Generate JSON File
+      </button>
+
+      <button id="downloadBtn" disabled class="w-full p-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded">
+     ⬇️ Download JSON
+      </button>
+
+      <button id="uploadBtn" disabled class="w-full p-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded">
+        ⬆️ Upload to API
+      </button>
+
+      <div class="space-y-2 mt-4">
+        <label class="block">
+          <span class="text-sm font-semibold">Upload Frequency:</span>
+          <select id="uploadFrequency" class="w-full p-2 rounded bg-white text-black">
+            <option value="1000">1 per second</option>
+            <option value="300">3 per second</option>
+            <option value="200">5 per second</option>
+            <option value="100">10 per second</option>
+            <option value="20">50 per second</option>
+            <option value="60000">1 per minute</option>
+            <option value="6000">10 per minute</option>
+            <option value="2000">30 per minute</option>
+            <option value="600">100 per minute</option>
+            <option value="300">200 per minute</option>
+          </select>
+        </label>
+
+        <label class="block">
+          <span class="text-sm font-semibold">Auto-stop after:</span>
+          <select id="duration" class="w-full p-2 rounded bg-white text-black">
+            <option value="0">No limit</option>
+            <option value="5">5 minutes</option>
+            <option value="15">15 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">1 hour</option>
+            <option value="180">3 hours</option>
+            <option value="300">5 hours</option>
+          </select>
+        </label>
+
+        <div id="remainingTimeDisplay" class="text-sm font-semibold text-gray-700 dark:text-gray-300"></div>
+
+        <div class="flex gap-2">
+          <button id="startAutoUploadBtn" class="flex-1 p-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
+            ▶️ Start Auto Upload
           </button>
-          <button id="btnRefresh" class="btn btn-secondary">
-            <i class="fas fa-sync-alt"></i> Refresh
-          </button>
-          <button id="btnShowAll" class="btn btn-success">
-            <i class="fas fa-database"></i> Show All
+          <button id="stopAutoUploadBtn" class="flex-1 p-2 bg-red-600 hover:bg-red-700 text-white rounded" disabled>
+            ⏹️ Stop
           </button>
         </div>
       </div>
     </div>
 
-    <!-- Controls: rows-per-page + info -->
-    <div class="d-flex justify-content-between align-items-center mb-2">
-      <div class="d-flex align-items-center gap-2">
-        <label class="mb-0">Rows per page:</label>
-        <select id="rowsPerPage" class="form-select d-inline-block w-auto">
-          <option value="5">5</option>
-          <option value="10">10</option>
-          <option value="25">25</option>
-          <option value="50">50</option>
-          <option value="100">100</option>
-        </select>
-      </div>
-
-      <div id="pageInfo" class="text-muted">No data loaded</div>
-    </div>
-
-    <div class="table-responsive card p-3 shadow-sm">
-      <table class="table table-bordered mb-0" id="resultTable">
-        <thead>
-          <tr>
-            <th style="width:15%">Device ID</th>
-            <th style="width:12%">Humidity</th>
-            <th style="width:12%">Pressure</th>
-            <th style="width:12%">Temperature</th>
-            <th style="width:18%">Location</th>
-            <th style="width:31%">Timestamp</th>
-          </tr>
-        </thead>
-        <tbody id="resultBody">
-          <tr><td colspan="6" class="text-center text-muted">No results — perform a search or click Show All</td></tr>
-        </tbody>
-      </table>
-
-      <nav class="mt-3">
-        <ul class="pagination justify-content-start mb-0" id="pagination"></ul>
-      </nav>
+    <div class="bg-gray-200 dark:bg-gray-800 p-4 rounded-xl shadow">
+      <h2 class="font-semibold mb-2">Generated JSON Preview:</h2>
+      <pre id="jsonPreview" class="code-box text-sm overflow-x-auto text-green-400"></pre>
     </div>
   </div>
 
-  <script>
-  // ================== Configuration ==================
-  const apiBaseUrl = "https://1didwbq7ui.execute-api.us-east-1.amazonaws.com/prod";
-  // ===================================================
+<script>
+const locations = ["Ajmer","Alwar","Banswara","Barmer","Bharatpur","Bhilwara","Bikaner","Bundi","Chittorgarh","Churu","Dausa","Dholpur","Dungarpur","Hanumangarh","Jaipur","Jaisalmer","Jalore","Jhalawar","Jhunjhunu","Jodhpur","Karauli","Kota","Nagaur","Pali","Pratapgarh","Rajsamand","Sawai Madhopur","Sikar","Sirohi","Sri Ganganagar","Tonk","Udaipur"];
+let lastGeneratedData = [];
+let autoUploadInterval = null;
+let autoStopTimeout = null;
+let countdownInterval = null;
+let successfulUploads = 0;
 
-  // State
-  let currentEndpoint = null; // "search" or "search-all"
-  let rowsPerPage = parseInt(localStorage.getItem("rowsPerPage") || "10", 10);
-  let currentPage = 1;
-  // pagesCache: { "search": { "<querySignature>": { pages: {1: items, 2: items}, lastKeys: {1: null,2: "<LEK>"} } }, "search-all": { pages: {...}, ... } }
-  // To keep it simple, we store one active session per endpoint keyed by a signature (query params).
-  const sessions = {};
-  // activeSessionKey string identifies current session (endpoint + query params)
-  let activeSessionKey = null;
+// Pad numbers to 3 digits
+function pad(num) {
+  return String(num).padStart(3, '0');
+}
 
-  // DOM refs
-  const elRowsPerPage = document.getElementById("rowsPerPage");
-  const elResultBody = document.getElementById("resultBody");
-  const elPagination = document.getElementById("pagination");
-  const elPageInfo = document.getElementById("pageInfo");
+// Generate a single IoT entry
+function generateEntry() {
+  const autoDeviceId = document.getElementById("autoDeviceId").checked;
+  const autoHumidity = document.getElementById("autoHumidity").checked;
+  const autoPressure = document.getElementById("autoPressure").checked;
+  const autoTemperature = document.getElementById("autoTemperature").checked;
+  const autoLocation = document.getElementById("autoLocation").checked;
 
-  // Initialize UI values
-  elRowsPerPage.value = String(rowsPerPage);
+  const deviceIdInput = document.getElementById("deviceId");
+  const humidityInput = document.getElementById("humidity");
+  const pressureInput = document.getElementById("pressure");
+  const temperatureInput = document.getElementById("temperature");
+  const locationSelect = document.getElementById("location");
 
-  // Util: build a simple session key for current filters so search caching is per-filter
-  function buildSessionKey(endpoint, params = {}) {
-    // Only include relevant params for uniqueness
-    if (endpoint === "search") {
-      return `search|device=${params.device_id || ""}|from=${params.from || ""}|to=${params.to || ""}|limit=${rowsPerPage}`;
-    }
-    return `search-all|limit=${rowsPerPage}`;
+  const deviceId = autoDeviceId ? `sensor-${pad(Math.floor(Math.random() * 100 + 1))}` : deviceIdInput.value;
+  if (autoDeviceId) deviceIdInput.value = deviceId;
+
+  const humidity = autoHumidity ? Math.floor(Math.random() * 91) + 10 : (Number(humidityInput.value) || 0);
+  if (autoHumidity) humidityInput.value = humidity;
+
+  const pressure = autoPressure ? Math.floor(Math.random() * 201) + 900 : (Number(pressureInput.value) || 0);
+  if (autoPressure) pressureInput.value = pressure;
+
+  const temperature = autoTemperature ? Math.floor(Math.random() * 45) + 11 : (Number(temperatureInput.value) || 0);
+  if (autoTemperature) temperatureInput.value = temperature;
+
+  const location = autoLocation ? locations[Math.floor(Math.random() * locations.length)] : locationSelect.value;
+  if (autoLocation) locationSelect.value = location;
+
+  return {
+    device_id: deviceId,
+    humidity,
+    pressure,
+    temperature,
+    location,
+    timestamp: new Date().toISOString().split(".")[0] + 'Z',
+  };
+}
+
+// Generate JSON entries
+function generateJSON() {
+  const num = document.getElementById("autoMultiple").checked ? parseInt(document.getElementById("numEntries").value) : 1;
+  lastGeneratedData = Array.from({ length: num }, generateEntry);
+  document.getElementById("jsonPreview").textContent = JSON.stringify(lastGeneratedData, null, 2);
+
+  // Enable buttons
+  document.getElementById("downloadBtn").disabled = false;
+  document.getElementById("uploadBtn").disabled = false;
+}
+
+// Download JSON file
+function downloadJSON() {
+  if (!lastGeneratedData.length) return;
+  const dataStr = JSON.stringify(lastGeneratedData, null, 2);
+  const blob = new Blob([dataStr], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const deviceId = lastGeneratedData[0].device_id || "device";
+  const safeTimestamp = lastGeneratedData[0].timestamp
+    .replace(/[:.]/g, "-")
+    .replace("T", "_")
+    .replace("Z", "");
+  const filename = `${deviceId}_${safeTimestamp}.json`;
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+const apiEndpoint = "https://1didwbq7ui.execute-api.us-east-1.amazonaws.com/prod/Iot-data_producer";
+
+// Upload to API
+async function uploadToAPI() {
+  if (!lastGeneratedData.length) {
+    alert("⚠️ Please generate JSON first.");
+    return;
   }
+  try {
+    const response = await fetch(apiEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(lastGeneratedData.length === 1 ? lastGeneratedData[0] : lastGeneratedData)
+    });
+    const result = await response.json();
+    if (response.ok) {
+      console.log("✅ Upload success:", result);
+      successfulUploads++; 
+      updateRemainingTimeDisplay();
+    } else {
+      alert("❌ Upload failed!");
+      console.error(result);
+    }
+  } catch (err) {
+    alert("❌ Network error!");
+    console.error(err);
+  }
+}
 
-  // Helper: get or create session object
-  function getSession(key) {
-    if (!sessions[key]) {
-      sessions[key] = {
-        pages: {},      // pages[pageNumber] = array of items
-        lastKeys: {},   // lastKeys[pageNumber] = last_evaluated_key returned AFTER fetching that page (used to fetch next page)
-        fetchedPages: 0 // highest page fetched
+// Auto upload loop
+async function autoUploadLoop() {
+  generateJSON();
+  await uploadToAPI();
+}
+
+// Update display helper
+function updateRemainingTimeDisplay(remainingSeconds = null) {
+  const remainingTimeDisplay = document.getElementById("remainingTimeDisplay");
+  let timePart = remainingSeconds !== null
+    ? `⏳ Time left: ${Math.floor(remainingSeconds / 60)}m ${remainingSeconds % 60}s`
+    : '';
+  remainingTimeDisplay.textContent = `${timePart} | 📦 Successful uploads: ${successfulUploads}`;
+}
+
+// DOM ready
+document.addEventListener("DOMContentLoaded", () => {
+  // Populate location select
+  const locationSelect = document.getElementById("location");
+  locations.forEach(loc => {
+    const option = document.createElement("option");
+    option.value = loc;
+    option.text = loc;
+    locationSelect.appendChild(option);
+  });
+  generateEntry();
+
+  // Dark mode persistence
+  const darkToggle = document.getElementById("darkModeToggle");
+  if (localStorage.getItem("darkMode") === "true") {
+    document.body.classList.add("dark");
+    darkToggle.checked = true;
+  }
+  darkToggle.addEventListener("change", (e) => {
+    document.body.classList.toggle("dark", e.target.checked);
+    localStorage.setItem("darkMode", e.target.checked);
+  });
+
+  // Button events
+  document.getElementById("generateBtn").addEventListener("click", generateJSON);
+  document.getElementById("downloadBtn").addEventListener("click", downloadJSON);
+  document.getElementById("uploadBtn").addEventListener("click", uploadToAPI);
+
+  const startBtn = document.getElementById("startAutoUploadBtn");
+  const stopBtn = document.getElementById("stopAutoUploadBtn");
+
+  startBtn.addEventListener("click", () => {
+    const freq = parseInt(document.getElementById("uploadFrequency").value);
+    const durationMinutes = parseInt(document.getElementById("duration").value);
+
+    clearInterval(autoUploadInterval);
+    clearTimeout(autoStopTimeout);
+    clearInterval(countdownInterval);
+
+    successfulUploads = 0; // reset count
+    autoUploadLoop();
+    autoUploadInterval = setInterval(autoUploadLoop, freq);
+
+    if (durationMinutes > 0) {
+      let remainingSeconds = durationMinutes * 60;
+      const updateRemainingTime = () => {
+        updateRemainingTimeDisplay(remainingSeconds);
+        remainingSeconds--;
       };
-    }
-    return sessions[key];
-  }
+      updateRemainingTime();
+      countdownInterval = setInterval(updateRemainingTime, 1000);
 
-  // Build URL for server-side endpoints (adds limit and last_key when provided)
-  function buildUrlForPage(endpoint, params = {}, pageNumber = 1) {
-    let url;
-    if (endpoint === "search") {
-      url = new URL(`${apiBaseUrl}/search`);
-      if (params.device_id) url.searchParams.append("device_id", params.device_id);
-      if (params.from) url.searchParams.append("from", params.from);
-      if (params.to) url.searchParams.append("to", params.to);
-      url.searchParams.append("limit", rowsPerPage);
+      autoStopTimeout = setTimeout(() => {
+  	clearInterval(autoUploadInterval);
+	  clearInterval(countdownInterval);
+	  autoUploadInterval = null;
+	  startBtn.disabled = false;
+	  stopBtn.disabled = true;
+	  document.getElementById("remainingTimeDisplay").textContent =
+	    `✅ Auto-upload stopped. Total successful uploads: ${successfulUploads}`;
+	}, durationMinutes * 60 * 1000);
     } else {
-      url = new URL(`${apiBaseUrl}/search-all`);
-      url.searchParams.append("limit", rowsPerPage);
+      updateRemainingTimeDisplay();
     }
 
-    // include last_key if we have an ExclusiveStartKey for this page (we send the key that leads into this page)
-    const sessionKey = buildSessionKey(endpoint, params);
-    const session = sessions[sessionKey];
-    if (session && pageNumber > 1) {
-      const startKey = session.lastKeys[pageNumber - 1] || null; // ExclusiveStartKey to request pageNumber
-      if (startKey) {
-        // last_key should be a JSON string (your lambda expects JSON string and does json.loads)
-        url.searchParams.append("last_key", startKey);
-      }
-    }
-    return url.toString();
-  }
-
-  // Render table rows from an items array
-  function renderTableItems(items) {
-    elResultBody.innerHTML = "";
-    if (!items || items.length === 0) {
-      elResultBody.innerHTML = "<tr><td colspan='6' class='text-center text-muted'>No results found.</td></tr>";
-      return;
-    }
-    const rowsHtml = items.map(item => {
-      return `<tr>
-        <td>${escapeHtml(item.device_id ?? "—")}</td>
-        <td>${escapeHtml(item.humidity ?? "—")}</td>
-        <td>${escapeHtml(item.pressure ?? "—")}</td>
-        <td>${escapeHtml(item.temperature ?? "—")}</td>
-        <td>${escapeHtml(item.location ?? "—")}</td>
-        <td>${escapeHtml(item.timestamp ?? "—")}</td>
-      </tr>`;
-    }).join("");
-    elResultBody.innerHTML = rowsHtml;
-  }
-
-  // Escaping helper (small)
-  function escapeHtml(s) {
-    if (s === null || s === undefined) return "";
-    return String(s)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;");
-  }
-
-  // Fetch a page (1-based). If it's already cached we use cache. Otherwise request backend with the appropriate last_key.
-  async function fetchPage(endpoint, params = {}, pageNumber = 1) {
-    activeSessionKey = buildSessionKey(endpoint, params);
-    const session = getSession(activeSessionKey);
-
-    // If we already have page in cache, render it
-    if (session.pages[pageNumber]) {
-      currentPage = pageNumber;
-      renderTableItems(session.pages[pageNumber]);
-      renderPaginationControls(endpoint, params);
-      return;
-    }
-
-    // Build URL — it may include last_key from session.lastKeys[pageNumber-1]
-    const url = buildUrlForPage(endpoint, params, pageNumber);
-
-    try {
-      showLoading();
-      const res = await fetch(url);
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const payload = await res.json();
-
-      // payload expected shape: { items: [...], last_key: "<JSON string>" } per your lambda
-      const items = payload.items || [];
-      const lastKeyFromServer = payload.last_key || null; // string or null
-
-      // Cache results
-      session.pages[pageNumber] = items;
-      session.lastKeys[pageNumber] = lastKeyFromServer; // this key is used as ExclusiveStartKey for next page
-      session.fetchedPages = Math.max(session.fetchedPages, pageNumber);
-
-      // Update UI
-      currentPage = pageNumber;
-      renderTableItems(items);
-      renderPaginationControls(endpoint, params);
-
-    } catch (err) {
-      console.error("Error fetching page:", err);
-      elResultBody.innerHTML = `<tr><td colspan="6" class="text-danger">Error fetching data: ${escapeHtml(String(err))}</td></tr>`;
-      elPagination.innerHTML = "";
-      elPageInfo.textContent = "Error";
-    } finally {
-      hideLoading();
-    }
-  }
-
-  // Render pagination: Prev, page numbers for fetched pages, Next (enabled if lastKey for current page is non-null)
-  function renderPaginationControls(endpoint, params = {}) {
-    const sessionKey = buildSessionKey(endpoint, params);
-    const session = getSession(sessionKey);
-
-    const totalFetched = session.fetchedPages || 0;
-    const current = currentPage;
-    const hasPrev = current > 1;
-    const hasNext = !!session.lastKeys[current]; // if lastKeys[current] is non-null, there is a next page
-
-    // Build pagination UI
-    elPagination.innerHTML = "";
-
-    // Prev
-    const prevLi = document.createElement("li");
-    prevLi.className = `page-item ${hasPrev ? "" : "disabled"}`;
-    const prevA = document.createElement("a");
-    prevA.className = "page-link";
-    prevA.href = "#";
-    prevA.textContent = "« Prev";
-    prevA.addEventListener("click", (e) => {
-      e.preventDefault();
-      if (hasPrev) fetchPage(endpoint, params, current - 1);
-    });
-    prevLi.appendChild(prevA);
-    elPagination.appendChild(prevLi);
-
-    // Page numbers for pages already fetched (1..totalFetched)
-    // Show a small window around current for clarity (we only show pages that are already fetched)
-    const windowSize = 3;
-    const start = Math.max(1, current - windowSize);
-    const end = Math.min(totalFetched, current + windowSize);
-    // If first fetched page > 1 (shouldn't happen) show first
-    for (let p = start; p <= end; p++) {
-      const li = document.createElement("li");
-      li.className = `page-item ${p === current ? "active" : ""}`;
-      const a = document.createElement("a");
-      a.className = "page-link";
-      a.href = "#";
-      a.textContent = p;
-      a.addEventListener("click", (e) => {
-        e.preventDefault();
-        fetchPage(endpoint, params, p);
-      });
-      li.appendChild(a);
-      elPagination.appendChild(li);
-    }
-
-    // If there are more pages that haven't been fetched yet, show an ellipsis + next page number (current+1)
-    if (hasNext) {
-      const ell = document.createElement("li");
-      ell.className = "page-item disabled";
-      const span = document.createElement("span");
-      span.className = "page-link";
-      span.textContent = "…";
-      ell.appendChild(span);
-      elPagination.appendChild(ell);
-
-      const nextPageNumber = totalFetched + 1; // this is the next page we will fetch
-      const liNextPage = document.createElement("li");
-      liNextPage.className = `page-item ${nextPageNumber === current ? "active" : ""}`;
-      const aNextPage = document.createElement("a");
-      aNextPage.className = "page-link";
-      aNextPage.href = "#";
-      aNextPage.textContent = nextPageNumber;
-      aNextPage.addEventListener("click", (e) => {
-        e.preventDefault();
-        fetchPage(endpoint, params, nextPageNumber);
-      });
-      liNextPage.appendChild(aNextPage);
-      elPagination.appendChild(liNextPage);
-    }
-
-    // Next
-    const nextLi = document.createElement("li");
-    nextLi.className = `page-item ${hasNext ? "" : "disabled"}`;
-    const nextA = document.createElement("a");
-    nextA.className = "page-link";
-    nextA.href = "#";
-    nextA.textContent = "Next »";
-    nextA.addEventListener("click", (e) => {
-      e.preventDefault();
-      if (hasNext) {
-        // Next page number is either current+1 or totalFetched+1; use current+1
-        fetchPage(endpoint, params, current + 1);
-      }
-    });
-    nextLi.appendChild(nextA);
-    elPagination.appendChild(nextLi);
-
-    // Page info text
-    const showingCount = (session.pages[current] || []).length;
-    const showingStart = ((current - 1) * rowsPerPage) + 1;
-    const showingEnd = showingStart + showingCount - 1;
-    const more = hasNext ? " (more available)" : "";
-    elPageInfo.textContent = `Page ${current} · Showing ${showingStart}-${showingEnd} of page (rows per page ${rowsPerPage})${more}`;
-  }
-
-  // UI helpers
-  function showLoading() {
-    // simple visual; you can replace with spinner
-    elPageInfo.textContent = "Loading…";
-  }
-  function hideLoading() {
-    // no-op; pageInfo updated by renderPaginationControls
-  }
-
-  // Handlers for Search and ShowAll
-  async function handleSearch(page = 1) {
-    const device_id = document.getElementById("device_id").value.trim();
-    const from = document.getElementById("from").value;
-    const to = document.getElementById("to").value;
-
-    if (!device_id) {
-      alert("Device ID is required for search.");
-      return;
-    }
-
-    // New search session -> reset session for this signature
-    const params = { device_id, from, to };
-    const sessionKey = buildSessionKey("search", params);
-    sessions[sessionKey] = { pages: {}, lastKeys: {}, fetchedPages: 0 };
-
-    currentEndpoint = "search";
-    await fetchPage("search", params, page);
-  }
-
-  async function handleShowAll(page = 1) {
-    const params = {};
-    const sessionKey = buildSessionKey("search-all", params);
-    sessions[sessionKey] = { pages: {}, lastKeys: {}, fetchedPages: 0 };
-
-    currentEndpoint = "search-all";
-    await fetchPage("search-all", params, page);
-  }
-
-  // Wire up buttons
-  document.getElementById("btnSearch").addEventListener("click", () => handleSearch(1));
-  document.getElementById("btnShowAll").addEventListener("click", () => handleShowAll(1));
-  document.getElementById("btnRefresh").addEventListener("click", () => {
-    if (!currentEndpoint) return location.reload();
-    // re-fetch current page fresh (clear session cache for this key)
-    const [ep, ...rest] = activeSessionKey.split("|");
-    if (currentEndpoint === "search") {
-      // reconstruct params from form and start fresh
-      handleSearch(currentPage);
-    } else {
-      handleShowAll(currentPage);
-    }
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
   });
 
-  // rowsPerPage change
-  elRowsPerPage.addEventListener("change", () => {
-    const newVal = parseInt(elRowsPerPage.value, 10) || 10;
-    rowsPerPage = newVal;
-    localStorage.setItem("rowsPerPage", String(newVal));
-    // Reset sessions because limit changed -> different pagination keys
-    Object.keys(sessions).forEach(k => delete sessions[k]);
-    // Re-run current action (if any) from page 1
-    if (currentEndpoint === "search") handleSearch(1);
-    else if (currentEndpoint === "search-all") handleShowAll(1);
-    else {
-      // no current endpoint — clear table and pagination
-      elResultBody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">Rows per page set to ${rowsPerPage}. Run a search or Show All.</td></tr>`;
-      elPagination.innerHTML = "";
-      elPageInfo.textContent = "No data loaded";
-    }
-  });
-
-  // Keyboard: Enter on device id triggers search
-  document.getElementById("device_id").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleSearch(1);
-    }
-  });
-
-  // Initial UI
-  elPageInfo.textContent = `Rows per page: ${rowsPerPage}. No data loaded.`;
-
-  </script>
+  stopBtn.addEventListener("click", () => {
+  clearInterval(autoUploadInterval);
+  clearTimeout(autoStopTimeout);
+  clearInterval(countdownInterval);
+  autoUploadInterval = null;
+  autoStopTimeout = null;
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  document.getElementById("remainingTimeDisplay").textContent =
+    ⏹️ Stopped manually. Total successful uploads: ${successfulUploads}`;
+});
+});
+</script>
 </body>
 </html>
