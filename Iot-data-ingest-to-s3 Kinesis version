@@ -1,0 +1,440 @@
+import io
+import urllib.parse
+import json
+import boto3
+import os
+import base64
+import uuid
+from decimal import Decimal
+from datetime import datetime
+from botocore.exceptions import ClientError
+import zipfile
+
+# AWS Clients
+s3 = boto3.client('s3')
+dynamodb = boto3.resource('dynamodb')
+sns = boto3.client('sns')
+
+# Environment Variables
+BUCKET_NAME = os.environ['BUCKET_NAME']
+TABLE_NAME = os.environ['TABLE_NAME']
+PROCESSED_TABLE_NAME = os.environ['PROCESSED_TABLE_NAME']
+SNS_TOPIC_ARN = os.environ['SNS_TOPIC_ARN']
+KINESIS_SUMMARY_TABLE_NAME = os.environ.get("KINESIS_SUMMARY_TABLE_NAME", "KinesisIngestionSummary")
+dynamodb_resource = boto3.resource('dynamodb')
+kinesis_summary_table = dynamodb.Table(KINESIS_SUMMARY_TABLE_NAME)
+
+def lambda_handler(event, context):
+    try:
+        print("Incoming Event:", json.dumps(event))
+
+        # Handle CORS preflight requests (OPTIONS)
+        if event.get("requestContext", {}).get("http", {}).get("method") == "OPTIONS":
+            return {  
+                'statusCode': 200,
+                'headers': {  
+                    'Access-Control-Allow-Origin': '*',  
+                    'Access-Control-Allow-Methods': 'POST, OPTIONS',  
+                    'Access-Control-Allow-Headers': 'Content-Type' 
+                },
+                "body": "Preflight OK"
+            } 
+
+        # Identify if it's from API Gateway (HTTP API v2)
+        if event.get("version") == "2.0" and "requestContext" in event:
+            return handle_api_gateway_event(event)
+
+        # Identify if it's an S3 event
+        elif "Records" in event and event["Records"][0].get("eventSource") == "aws:s3":
+            return handle_s3_event(event)
+
+        elif "Records" in event and event["Records"][0].get("eventSource") == "aws:kinesis":
+            return handle_kinesis_event(event)
+
+        else:
+            return respond_with_error("Unsupported Event", "Unsupported event structure", event)
+    
+    except Exception as e:
+        return respond_with_error("Handler Error", str(e), event)
+        print(error_message)
+        send_alert("Handler Error", error_message, event)
+        return {
+            'statusCode': 500,
+            'headers': {  # 🆕
+                'Access-Control-Allow-Origin': '*'  # 🆕
+            },
+            'body': json.dumps({'error': error_message})
+        }
+
+def handle_api_gateway_event(event):
+    try:
+        # 🔧 CHANGED: decode base64 body if needed (from API Gateway / static website POST)
+        if event.get('isBase64Encoded', False):  # 🆕
+            decoded_body = base64.b64decode(event['body']).decode('utf-8')  # 🆕
+        else:
+            decoded_body = event['body']  # 🆕
+
+        body = json.loads(decoded_body)  # 🔧 CHANGED
+
+        required_fields = ['device_id', 'timestamp', 'temperature']
+        for field in required_fields:
+            if field not in body:
+                return respond_with_error("Validation Error", f"Missing field: {field}", body)
+
+        try:
+            dt = datetime.strptime(body['timestamp'], "%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            return respond_with_error("Validation Error", "Invalid timestamp format", body)
+
+        device_id = body['device_id']
+        timestamp = body['timestamp']
+        s3_key = f"raw_data/api/year={dt.year}/month={dt.month:02d}/day={dt.day:02d}/{device_id}_{timestamp}.json"
+
+        metadata_table = dynamodb.Table(TABLE_NAME)
+        processed_table = dynamodb.Table(PROCESSED_TABLE_NAME)
+
+        try:
+            response = metadata_table.get_item(Key={'device_id': device_id, 'timestamp': timestamp})
+            if 'Item' in response:
+                return respond_with_error("Duplicate Data", "Record already exists", body)
+        except ClientError as e:
+            return respond_with_error("DynamoDB Error", e.response['Error']['Message'], body)
+
+        s3.put_object(
+            Bucket=BUCKET_NAME,
+            Key=s3_key,
+            Body=json.dumps(body),
+            ContentType='application/json'
+        )
+
+        metadata_table.put_item(Item={
+            'device_id': device_id,
+            'timestamp': timestamp,
+            's3_key': s3_key,
+            'bucket': BUCKET_NAME,
+            'status': 'ingested',
+            'ingested_at': datetime.utcnow().isoformat()
+        })
+
+        processed_table.put_item(Item=body)
+
+        send_alert("IoT Data Ingested", f"Device: {device_id}\nTimestamp: {timestamp}\nS3 Key: {s3_key}", body)
+
+        return {
+            'statusCode': 200,
+            'headers': {  # 🆕
+                'Access-Control-Allow-Origin': '*',  # 🆕
+                'Content-Type': 'application/json'  # 🆕
+            },
+            'body': json.dumps({'message': 'Data successfully ingested'})
+        }
+        
+    except Exception as e:
+        error_message = f"API Error: {str(e)}"
+        return {
+            'statusCode': 500,
+            'headers': {  # 🆕
+                'Access-Control-Allow-Origin': '*'  # 🆕
+            },
+            'body': json.dumps({'error': error_message})
+        }
+        
+def handle_s3_event(event):
+    metadata_table = dynamodb.Table(TABLE_NAME)
+    processed_table = dynamodb.Table(PROCESSED_TABLE_NAME)
+
+    for record in event['Records']:
+        bucket = record['s3']['bucket']['name']
+        key = urllib.parse.unquote_plus(record['s3']['object']['key'])
+        filename = key.split('/')[-1]
+
+        if filename.endswith('.zip'):
+            try:
+                zip_obj = s3.get_object(Bucket=bucket, Key=key)
+                buffer = io.BytesIO(zip_obj['Body'].read())
+
+                with zipfile.ZipFile(buffer, 'r') as zip_ref:
+                    for zip_filename in zip_ref.namelist():
+                        if not zip_filename.endswith('.json'):
+                            continue
+
+                        json_bytes = zip_ref.read(zip_filename)
+                        try:
+                            json_data = json.loads(json_bytes)
+                        except Exception as e:
+                            send_alert("❌ JSON Parse Error", f"Failed to parse {zip_filename}", {"key": key, "error": str(e)})
+                            continue
+
+                        if not all(f in json_data for f in ['device_id', 'timestamp', 'temperature']):
+                            send_alert("❌ Missing Fields", f"{zip_filename} missing required fields", json_data)
+                            continue
+
+                        device_id = json_data['device_id']
+                        timestamp = json_data['timestamp']
+
+                        try:
+                            timestamp_clean = timestamp.replace('_', ':')
+                            if 'T' in timestamp_clean:
+                                date_part, time_part = timestamp_clean.split('T')
+                                time_part = time_part.replace('-', ':')
+                                timestamp_clean = f"{date_part}T{time_part}"
+                            datetime.strptime(timestamp_clean, "%Y-%m-%dT%H:%M:%SZ")
+                        except ValueError:
+                            send_alert("❌ Timestamp Format Error", f"Invalid timestamp: {timestamp}", json_data)
+                            continue
+
+                        try:
+                            response = metadata_table.get_item(Key={'device_id': device_id, 'timestamp': timestamp})
+                            if 'Item' in response:
+                                continue
+                        except ClientError as e:
+                            send_alert("❌ DynamoDB Error", e.response['Error']['Message'], json_data)
+                            continue
+
+                        metadata_table.put_item(Item={
+                            'device_id': device_id,
+                            'timestamp': timestamp,
+                            's3_key': f"{key}::{zip_filename}",
+                            'bucket': bucket,
+                            'status': 'uploaded_from_zip',
+                            'ingested_at': datetime.utcnow().isoformat()
+                        })
+
+                        processed_table.put_item(Item=json_data)
+
+                        send_alert("✅ JSON from ZIP Ingested", f"{zip_filename} from {key} ingested", json_data)
+
+            except Exception as e:
+                send_alert("❌ ZIP Processing Error", f"Failed to process ZIP {key}: {str(e)}", {"key": key})
+
+        else:
+            try:
+                device_id, timestamp_raw = filename.replace('.json', '').split('_', 1)
+                timestamp_clean = timestamp_raw.replace('_', ':')
+                if 'T' in timestamp_clean:
+                    date_part, time_part = timestamp_clean.split('T')
+                    time_part = time_part.replace('-', ':')
+                    timestamp_clean = f"{date_part}T{time_part}"
+                try:
+                    datetime.strptime(timestamp_clean, "%Y-%m-%dT%H:%M:%SZ")
+                except ValueError:
+                    send_alert("❌ Timestamp Format Error", f"Invalid timestamp in filename: {timestamp_raw}", {"key": key})
+                    continue
+            except Exception as e:
+                send_alert("❌ Filename Parsing Error", f"Failed to parse: {filename}", {"key": key})
+                continue
+
+            response = metadata_table.get_item(Key={'device_id': device_id, 'timestamp': timestamp_raw})
+            if 'Item' in response:
+                continue
+
+            metadata_table.put_item(Item={
+                'device_id': device_id,
+                'timestamp': timestamp_raw,
+                's3_key': key,
+                'bucket': bucket,
+                'status': 'uploaded',
+                'ingested_at': datetime.utcnow().isoformat()
+            })
+
+            try:
+                body_obj = s3.get_object(Bucket=bucket, Key=key)
+                body_json = json.loads(body_obj['Body'].read())
+
+                # Handle single object or list of objects
+                if isinstance(body_json, list):
+                    for item in body_json:
+                        if isinstance(item, dict):
+                            processed_table.put_item(Item=item)
+                else:
+                    processed_table.put_item(Item=body_json)
+
+            except Exception as e:
+                send_alert("❌ Error Processing JSON", f"Error saving to processed table: {str(e)}", {"key": key})
+                continue
+
+            send_alert("✅ Raw JSON Ingested", f"{filename} ingested from S3", {"bucket": bucket, "key": key})
+
+    return {
+        'statusCode': 200,
+        'body': json.dumps({'message': 'S3 event processed'})
+    }
+
+def handle_kinesis_event(event):
+    metadata_table_name = TABLE_NAME
+    processed_table_name = PROCESSED_TABLE_NAME
+
+    metadata_batch = []
+    processed_batch = []
+    successful_count = 0
+
+    for record in event['Records']:
+        try:
+            payload_raw = base64.b64decode(record['kinesis']['data'])
+            payload = json.loads(payload_raw)
+
+            # Validate required fields
+            required_fields = ['device_id', 'timestamp', 'temperature']
+            if not all(field in payload for field in required_fields):
+                send_alert("❌ Missing Fields in Kinesis Record", "Record missing required fields", payload)
+                continue
+
+            device_id = payload['device_id']
+            timestamp = payload['timestamp']
+
+            # Ensure correct timestamp format
+            try:
+                dt = datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%SZ")
+            except ValueError:
+                send_alert("❌ Invalid Timestamp Format", f"Invalid timestamp: {timestamp}", payload)
+                continue
+
+            # Check if already ingested
+            existing = dynamodb.Table(metadata_table_name).get_item(Key={'device_id': device_id, 'timestamp': timestamp})
+            if 'Item' in existing:
+                continue
+
+            s3_key = f"raw_data/kinesis/year={dt.year}/month={dt.month:02d}/day={dt.day:02d}/{device_id}_{timestamp}.json"
+
+            # Save file to S3
+            s3.put_object(
+                Bucket=BUCKET_NAME,
+                Key=s3_key,
+                Body=json.dumps(payload),
+                ContentType='application/json'
+            )
+
+            # Add to metadata batch
+            metadata_batch.append({
+                'PutRequest': {
+                    'Item': {
+                        'device_id': device_id,
+                        'timestamp': timestamp,
+                        's3_key': s3_key,
+                        'bucket': BUCKET_NAME,
+                        'status': 'ingested_from_kinesis',
+                        'ingested_at': datetime.utcnow().isoformat()
+                    }
+                }
+            })
+
+            # Add to processed table batch
+            processed_batch.append({
+                'PutRequest': {
+                    'Item': payload
+                }
+            })
+
+            successful_count += 1
+
+            # Flush in chunks of 25 (DynamoDB limit)
+            if len(metadata_batch) == 25:
+                batch_write_with_retry(metadata_table_name, metadata_batch)
+                metadata_batch.clear()
+
+            if len(processed_batch) == 25:
+                batch_write_with_retry(processed_table_name, processed_batch)
+                processed_batch.clear()
+
+        except Exception as e:
+            send_alert("❌ Kinesis Processing Error", str(e), {"record": record})
+            continue
+
+    # Flush any remaining
+    if metadata_batch:
+        batch_write_with_retry(metadata_table_name, metadata_batch)
+    if processed_batch:
+        batch_write_with_retry(processed_table_name, processed_batch)
+
+    if successful_count > 0:
+        update_kinesis_summary(successful_count)
+
+    return {
+        'statusCode': 200,
+        'body': json.dumps({'message': f'Kinesis event processed, {successful_count} new ingested'})
+    }
+
+
+def batch_write_with_retry(table_name, requests):
+    """Batch write with retry for unprocessed items."""
+    table = dynamodb.Table(table_name)
+    try:
+        response = dynamodb.batch_write_item(RequestItems={table_name: requests})
+        unprocessed = response.get('UnprocessedItems', {})
+        retry_count = 0
+        while unprocessed and retry_count < 3:
+            time.sleep(2 ** retry_count)  # Exponential backoff
+            response = dynamodb.batch_write_item(RequestItems=unprocessed)
+            unprocessed = response.get('UnprocessedItems', {})
+            retry_count += 1
+        if unprocessed:
+            send_alert("⚠️ DynamoDB Unprocessed Items", "Some items could not be written after retries", unprocessed)
+    except Exception as e:
+        send_alert("❌ DynamoDB Batch Write Error", str(e), {"table": table_name, "requests": requests})
+
+def update_kinesis_summary(success_count):
+    now = datetime.utcnow()
+    now_str = now.isoformat()
+
+    # Read current state from DynamoDB
+    resp = kinesis_summary_table.get_item(Key={'summary_id': 'kinesis_counter'})
+    item = resp.get('Item')
+
+    if not item:
+        # Initialize record if it doesn't exist
+        item = {
+            'summary_id': 'kinesis_counter',
+            'count': Decimal(0),
+            # set far past so we wait full 5 min before first SNS
+            'last_sent_at': (now - timedelta(seconds=301)).isoformat()
+        }
+
+    current_count = int(item.get('count', 0))
+    last_sent_at_str = item.get('last_sent_at')
+    last_sent_at = datetime.fromisoformat(last_sent_at_str)
+
+    # Increment counter
+    new_count = current_count + success_count
+
+    # Check if it's time to send an alert
+    if (now - last_sent_at).total_seconds() >= 300:
+        # Send SNS alert
+        send_alert(
+            "✅ Kinesis Batch Ingestion Report",
+            f"Total records ingested in last 5 min: {new_count}",
+            {"count": new_count, "period_minutes": 5}
+        )
+
+        # Reset counter and update last sent time
+        kinesis_summary_table.put_item(Item={
+            'summary_id': 'kinesis_counter',
+            'count': Decimal(0),
+            'last_sent_at': now_str
+        })
+
+    else:
+        # Just update the counter without sending SNS
+        kinesis_summary_table.put_item(Item={
+            'summary_id': 'kinesis_counter',
+            'count': Decimal(new_count),
+            'last_sent_at': last_sent_at_str  # keep old last_sent_at
+        })
+
+def send_alert(subject, message, payload):
+    print(" SNS Alert:", subject)
+    sns.publish(
+        TopicArn=SNS_TOPIC_ARN,
+        Subject=subject,
+        Message=f"{message}\n\nPayload:\n{json.dumps(payload)}"
+    )
+
+def respond_with_error(subject, message, payload):
+    print(f"{subject}: {message}")
+    send_alert(subject, message, payload)
+    return {
+        'statusCode': 400,
+        'headers': {  # 🆕
+            'Access-Control-Allow-Origin': '*'  # 🆕
+        },
+        'body': json.dumps({'error': message})
+    }
